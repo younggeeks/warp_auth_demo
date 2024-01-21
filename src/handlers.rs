@@ -3,26 +3,74 @@ use warp::{reject::Rejection, reply::Reply};
 
 use crate::models::{Claims, Login, Registration, Role, User};
 
-pub async fn register(user: Registration) -> Result<impl Reply, Rejection> {
+pub async fn register(user: Registration, pool: sqlx::PgPool) -> Result<impl Reply, Rejection> {
     let user = User::new(32, user.username, user.email, user.password);
 
-    let token = generate_jwt_token(Claims {
-        email: user.email,
-        username: user.username,
-        roles: vec![Role::User],
-        exp: 1234568489,
-    })
-    .unwrap();
+    // created_at is a timestamp with time zone
 
-    Ok(warp::reply::json(&token))
+    let created_at = chrono::Utc::now().to_rfc3339();
+
+    println!("{:?}", &user);
+    match sqlx::query!(
+        "INSERT INTO users (id, username, email, password_hash, created_at) VALUES ($1, $2, $3, $4, $5)",
+        user.id,
+        user.username,
+        user.email,
+        user.password_hash,
+        created_at
+    )
+    .execute(&pool)
+    .await
+    {
+        Ok(_) => {
+            let token = generate_jwt_token(Claims {
+                email: user.email,
+                username: user.username,
+                roles: vec![Role::User],
+                exp: 1234568489,
+            })
+            .unwrap();
+
+            Ok(warp::reply::json(&token))
+        }
+        Err(e) => {
+            println!("{:?}", e);
+            return Err(warp::reject::reject());
+        }
+    }
 }
 
-pub async fn login(user: Login) -> Result<impl Reply, Rejection> {
+pub async fn login(user: Login, pool: sqlx::PgPool) -> Result<impl Reply, Rejection> {
     // check if user exists in the DB then verify password
-    let password = user.password;
-    let username = user.username;
+    let password = &user.password;
+    let username = &user.username;
 
-    Ok(warp::reply::json(&username))
+    // fix the error caused by created_at returning timestamp with time zone
+    let found_user: User =
+        match sqlx::query_as!(User, "SELECT  * FROM users WHERE username = $1", username)
+            .fetch_one(&pool)
+            .await
+        {
+            Ok(found) => found,
+            Err(_) => {
+                return Err(warp::reject::reject());
+            }
+        };
+
+    // expiry date should 2 hours from now
+    let expiry_date = chrono::Utc::now() + chrono::Duration::hours(2);
+
+    if found_user.verify_password(password) {
+        let claims = Claims {
+            email: found_user.email,
+            username: found_user.username,
+            roles: vec![Role::User],
+            exp: expiry_date.timestamp() as u64,
+        };
+        return Ok(warp::reply::json(&generate_jwt_token(claims).unwrap()));
+    } else {
+        Err(warp::reject::reject())
+    }
 }
 
 pub fn generate_jwt_token(claims: Claims) -> Result<String, Rejection> {

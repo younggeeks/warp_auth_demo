@@ -11,6 +11,13 @@ jsonwebtoken = "9.2.0"
 rust-argon2 = "2.1.0"
 serde = { version = "1.0.195", features = ["derive"] }
 serde_json = "1.0.111"
+sqlx = { version = "0.7.3", features = [
+    "migrate",
+    "macros",
+    "postgres",
+    "runtime-tokio",
+    "time",
+] }
 tokio = { version = "1.35.1", features = ["full"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
