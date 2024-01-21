@@ -1,8 +1,28 @@
+use handlers::{login, register};
+use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use models::Claims;
 use tracing_subscriber::fmt::format::FmtSpan;
 use warp::Filter;
 
+mod models;
+
+mod handlers;
+
 #[tokio::main]
 async fn main() {
+    let get_auth_token = warp::header::<String>("Authorization")
+        .map(|auth_header: String| auth_header.replace("Bearer ", ""));
+
+    let register = warp::post()
+        .and(warp::path("register"))
+        .and(warp::body::json::<models::Registration>())
+        .and_then(register);
+
+    let login = warp::post()
+        .and(warp::path("login"))
+        .and(warp::body::json::<models::Login>())
+        .and_then(login);
+
     let filter =
         std::env::var("RUST_LOG").unwrap_or_else(|_| "auth_demo=info,warp=debug".to_owned());
 
@@ -11,12 +31,7 @@ async fn main() {
         .with_span_events(FmtSpan::CLOSE)
         .init();
 
-    let hi = warp::path("hi")
-        .and(warp::path::param())
-        .and(warp::header("user-agent"))
-        .map(|param: String, agent: String| format!("Hello {}, whose agent is {}", param, agent));
-
-    let routes = hi.with(warp::trace::request());
+    let routes = register.or(login).with(warp::trace::request());
 
     warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
 }
