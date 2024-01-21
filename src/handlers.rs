@@ -1,3 +1,4 @@
+use handle_errors::error::Error;
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use warp::{reject::Rejection, reply::Reply};
 
@@ -6,11 +7,8 @@ use crate::models::{Claims, Login, Registration, Role, User};
 pub async fn register(user: Registration, pool: sqlx::PgPool) -> Result<impl Reply, Rejection> {
     let user = User::new(32, user.username, user.email, user.password);
 
-    // created_at is a timestamp with time zone
-
     let created_at = chrono::Utc::now().to_rfc3339();
 
-    println!("{:?}", &user);
     match sqlx::query!(
         "INSERT INTO users (id, username, email, password_hash, created_at) VALUES ($1, $2, $3, $4, $5)",
         user.id,
@@ -34,30 +32,26 @@ pub async fn register(user: Registration, pool: sqlx::PgPool) -> Result<impl Rep
             Ok(warp::reply::json(&token))
         }
         Err(e) => {
-            println!("{:?}", e);
             return Err(warp::reject::reject());
         }
     }
 }
 
 pub async fn login(user: Login, pool: sqlx::PgPool) -> Result<impl Reply, Rejection> {
-    // check if user exists in the DB then verify password
     let password = &user.password;
     let username = &user.username;
 
-    // fix the error caused by created_at returning timestamp with time zone
     let found_user: User =
         match sqlx::query_as!(User, "SELECT  * FROM users WHERE username = $1", username)
             .fetch_one(&pool)
             .await
         {
             Ok(found) => found,
-            Err(_) => {
-                return Err(warp::reject::reject());
+            Err(e) => {
+                return Err(warp::reject::custom(Error::InvalidCredentials));
             }
         };
 
-    // expiry date should 2 hours from now
     let expiry_date = chrono::Utc::now() + chrono::Duration::hours(2);
 
     if found_user.verify_password(password) {
@@ -69,7 +63,7 @@ pub async fn login(user: Login, pool: sqlx::PgPool) -> Result<impl Reply, Reject
         };
         return Ok(warp::reply::json(&generate_jwt_token(claims).unwrap()));
     } else {
-        Err(warp::reject::reject())
+        Err(warp::reject::custom(Error::InvalidCredentials))
     }
 }
 
