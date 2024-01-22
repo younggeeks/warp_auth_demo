@@ -1,6 +1,6 @@
+use handle_errors::error::return_error;
 use handlers::{login, register};
-use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
-use models::Claims;
+use sqlx::PgPool;
 use tracing_subscriber::fmt::format::FmtSpan;
 use warp::Filter;
 
@@ -10,17 +10,26 @@ mod handlers;
 
 #[tokio::main]
 async fn main() {
-    let get_auth_token = warp::header::<String>("Authorization")
-        .map(|auth_header: String| auth_header.replace("Bearer ", ""));
+    let database_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5436/postgres".to_owned());
+    let pool: PgPool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&database_url)
+        .await
+        .unwrap();
+
+    let db_filter = warp::any().map(move || pool.clone());
 
     let register = warp::post()
         .and(warp::path("register"))
         .and(warp::body::json::<models::Registration>())
+        .and(db_filter.clone())
         .and_then(register);
 
     let login = warp::post()
         .and(warp::path("login"))
         .and(warp::body::json::<models::Login>())
+        .and(db_filter.clone())
         .and_then(login);
 
     let filter =
@@ -31,7 +40,10 @@ async fn main() {
         .with_span_events(FmtSpan::CLOSE)
         .init();
 
-    let routes = register.or(login).with(warp::trace::request());
+    let routes = register
+        .or(login)
+        .with(warp::trace::request())
+        .recover(return_error);
 
     warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
 }

@@ -37,7 +37,7 @@ pub struct LoginResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct User {
-    pub id: u32,
+    pub id: i32,
     pub username: String,
     pub email: String,
     pub password_hash: String,
@@ -45,7 +45,7 @@ pub struct User {
 }
 
 impl User {
-    pub fn new(id: u32, username: String, email: String, password: String) -> Self {
+    pub fn new(id: i32, username: String, email: String, password: String) -> Self {
         let password_hash = User::hash_password(&password);
         let created_at = Utc::now().to_rfc3339();
 
