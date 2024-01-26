@@ -1,8 +1,11 @@
+use std::future;
+
 use handle_errors::error::Error;
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
-use warp::{reject::Rejection, reply::Reply};
+use sqlx::PgPool;
+use warp::{reject::Rejection, reply::Reply, Filter};
 
-use crate::models::{Claims, Login, Registration, Role, User};
+use crate::models::{self, Claims, Login, Registration, Role, User};
 
 pub async fn register(user: Registration, pool: sqlx::PgPool) -> Result<impl Reply, Rejection> {
     let user = User::new(32, user.username, user.email, user.password);
@@ -47,12 +50,12 @@ pub async fn login(user: Login, pool: sqlx::PgPool) -> Result<impl Reply, Reject
             .await
         {
             Ok(found) => found,
-            Err(e) => {
+            Err(_e) => {
                 return Err(warp::reject::custom(Error::InvalidCredentials));
             }
         };
 
-    let expiry_date = chrono::Utc::now() + chrono::Duration::hours(2);
+    let expiry_date = chrono::Utc::now() + chrono::Duration::minutes(2);
 
     if found_user.verify_password(password) {
         let claims = Claims {
@@ -65,6 +68,11 @@ pub async fn login(user: Login, pool: sqlx::PgPool) -> Result<impl Reply, Reject
     } else {
         Err(warp::reject::custom(Error::InvalidCredentials))
     }
+}
+
+pub async fn dashboard(pool: PgPool, claims: Claims) -> Result<impl Reply, Rejection> {
+    println!("claims: {:?}", claims);
+    Ok(warp::reply::json(&"dashboard"))
 }
 
 pub fn generate_jwt_token(claims: Claims) -> Result<String, Rejection> {
@@ -85,4 +93,44 @@ pub fn generate_jwt_token(claims: Claims) -> Result<String, Rejection> {
     }?;
 
     Ok(token)
+}
+
+// verify jwt token
+pub fn verify_token(token: String) -> Result<Claims, Rejection> {
+    let token = token.to_owned();
+    if token.is_empty() {
+        return Err(warp::reject::custom(handle_errors::error::Error::MissingCredentials));
+    }
+    let data = jsonwebtoken::decode::<models::Claims>(
+        &token,
+        &jsonwebtoken::DecodingKey::from_secret(b"supersecret_key"),
+        &jsonwebtoken::Validation::new(Algorithm::HS512),
+    )
+    .map_err(|e| match e.kind() {
+        jsonwebtoken::errors::ErrorKind::InvalidToken => handle_errors::error::Error::InvalidToken,
+        jsonwebtoken::errors::ErrorKind::InvalidSignature => {
+            handle_errors::error::Error::InvalidToken
+        }
+        jsonwebtoken::errors::ErrorKind::ExpiredSignature => {
+            handle_errors::error::Error::ExpiredSignature
+        }
+        _e => handle_errors::error::Error::InvalidToken,
+    })?;
+
+    Ok(data.claims)
+}
+pub fn auth() -> impl Filter<Extract = (Result<Claims, Rejection>,), Error = warp::Rejection> + Clone
+{
+    warp::header::<String>("Authorization").and_then(|token: String| {
+        let stripped_token = token.strip_prefix("Bearer ");
+
+        let token = match verify_token(stripped_token.unwrap().to_string()) {
+            Ok(t) => Ok(Ok(t)),
+            Err(e) => {
+                println!("error: {:?}", e);
+                Err(e)
+            }
+        };
+        future::ready(token)
+    })
 }

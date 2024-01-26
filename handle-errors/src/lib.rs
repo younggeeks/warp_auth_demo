@@ -14,6 +14,8 @@ pub mod error {
         MissingParameters,
         MissingCredentials,
         InvalidCredentials,
+        InvalidToken,
+        ExpiredSignature,
     }
 
     impl Reject for Error {}
@@ -27,10 +29,13 @@ pub mod error {
                 sqlx::Error::Tls(_) => todo!(),
                 sqlx::Error::Protocol(_) => todo!(),
                 sqlx::Error::RowNotFound => todo!(),
-                sqlx::Error::TypeNotFound { type_name } => todo!(),
-                sqlx::Error::ColumnIndexOutOfBounds { index, len } => todo!(),
+                sqlx::Error::TypeNotFound { type_name: _ } => todo!(),
+                sqlx::Error::ColumnIndexOutOfBounds { index: _, len: _ } => todo!(),
                 sqlx::Error::ColumnNotFound(_) => todo!(),
-                sqlx::Error::ColumnDecode { index, source } => todo!(),
+                sqlx::Error::ColumnDecode {
+                    index: _,
+                    source: _,
+                } => todo!(),
                 sqlx::Error::Decode(_) => todo!(),
                 sqlx::Error::AnyDriverError(_) => todo!(),
                 sqlx::Error::PoolTimedOut => todo!(),
@@ -44,7 +49,6 @@ pub mod error {
 
     impl Display for Error {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            println!("the self-contained room is {:?}", self);
             match *self {
                 Error::ParseError(ref err) => {
                     write!(f, "Can not parse parameter: {}", err)
@@ -52,6 +56,9 @@ pub mod error {
                 Error::MissingParameters => write!(f, "Missing Parameter"),
                 Error::MissingCredentials => write!(f, "Missing Credentials"),
                 Error::InvalidCredentials => write!(f, "Invalid Credentials"),
+                Error::InvalidToken => write!(f, "Invalid Token"),
+                Error::ExpiredSignature => write!(f, "Expired Signature"),
+                _ => write!(f, "Unknown Error"),
             }
         }
     }
@@ -65,6 +72,7 @@ pub mod error {
         if let Some(error) = r.find::<BodyDeserializeError>() {
             Ok(warp::reply::with_status(error.to_string(), StatusCode::BAD_REQUEST))
         } else if let Some(error) = r.find::<Error>() {
+            println!("{:?}", error);
             if error == &Error::InvalidCredentials {
                 return Ok(warp::reply::with_status(
                     error.to_string(),
